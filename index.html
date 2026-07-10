@@ -1,54 +1,235 @@
+<!DOCTYPE html>
 <html>
-    <head>
-        <title>2Bored2Wait</title>
-        <link rel="stylesheet" href="index.css">
-    </head>
-    <body>
-        <div class="content">
-            <button id="connectButton" class="start" onclick="start()">Connect</button><br><br>
+<head>
+    <title>Minecraft Packet Proxy</title>
+    <link rel="stylesheet" href="index.css">
+</head>
+<body>
+    <div class="container">
+        <div class="panel">
+            <h1>Minecraft Packet Proxy</h1>
+            <div class="form-row">
+                <label>Target server IP:</label>
+                <input type="text" id="serverIp" placeholder="135.148.134.45">
+            </div>
+            <div class="form-row">
+                <label>Target server port:</label>
+                <input type="number" id="serverPort" placeholder="23325">
+            </div>
+            <button class="small" onclick="saveServerConfig()">Save server</button>
+            <div class="form-row" style="margin-top:12px">
+                <label><input type="checkbox" id="knockbackTracking"> Knockback tracking</label>
+            </div>
+            <button id="connectButton" class="start" onclick="start()">Connect</button>
+            <p class="hint">Connect Minecraft to <code id="connectHint">localhost:25565</code> after connecting</p>
         </div>
-        <script>
-            setInterval(() => { //each second, update the info.
-                const xhr = new XMLHttpRequest();
-                xhr.open("GET", "/update", true);
-                xhr.onreadystatechange = function() {
-                    if (this.readyState == 4 && this.status == 200) {
-                        const response = JSON.parse(this.responseText);
-                        const connectButton = document.getElementById('connectButton');
-                        if (response.connected){
-                            connectButton.innerHTML = "Disconnect";
-                            connectButton.setAttribute('onclick', 'stop()');
-                            connectButton.className = 'stop';
-                        } else {
-                            connectButton.innerHTML = "Connect";
-                            connectButton.setAttribute('onclick', 'start()');
-                            connectButton.className = 'start';
-                        }
-                    }
+
+        <div class="panel">
+            <h2>Knockback Log</h2>
+            <p class="hint">Enable knockback tracking above, then get hit in-game. Logs dp (distance to attacker), sprint, initial/final velocity.</p>
+            <button class="small" onclick="refreshKnockbackLog()">Refresh</button>
+            <button class="small" onclick="downloadKnockbackLog()">Download JSON</button>
+            <button class="small" onclick="clearKnockbackLog()">Clear</button>
+            <pre id="knockbackLog" class="knockback-log"></pre>
+        </div>
+
+        <div class="panel">
+            <h2>Send Packet</h2>
+            <p class="hint">Inject a packet as if from server (→client) or from your game (→server)</p>
+            <div class="form-row">
+                <label>Direction:</label>
+                <select id="packetDir">
+                    <option value="client">→ Client (fake from server)</option>
+                    <option value="server">→ Server (fake from game)</option>
+                </select>
+            </div>
+            <div class="form-row">
+                <label>Packet name:</label>
+                <input type="text" id="packetName" placeholder="e.g. chat, title">
+            </div>
+            <div class="form-row">
+                <label>JSON data:</label>
+                <textarea id="packetData" rows="4" placeholder='{"message": "{\"text\":\"Hello\"}", "position": 0}'></textarea>
+            </div>
+            <button class="send" onclick="sendPacket()">Send Packet</button>
+            <div id="sendResult"></div>
+        </div>
+
+        <div class="panel">
+            <h2>Recent Packets</h2>
+            <p class="hint">Click a packet to copy its data into the form above</p>
+            <button class="small" onclick="refreshPackets()">Refresh</button>
+            <div id="packetList" class="packet-list"></div>
+        </div>
+    </div>
+
+    <script>
+        async function start() {
+            const ip = document.getElementById('serverIp').value.trim();
+            const port = document.getElementById('serverPort').value.trim();
+            if (ip && port) {
+                await fetch("/config", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ serverIp: ip, serverPort: parseInt(port, 10) })
+                });
+            }
+            fetch("/start").then(() => {});
+            document.getElementById('connectButton').innerHTML = "Disconnect";
+            document.getElementById('connectButton').setAttribute('onclick', 'stop()');
+            document.getElementById('connectButton').className = 'stop';
+        }
+        function stop() {
+            fetch("/stop").then(() => {});
+            document.getElementById('connectButton').innerHTML = "Connect";
+            document.getElementById('connectButton').setAttribute('onclick', 'start()');
+            document.getElementById('connectButton').className = 'start';
+        }
+
+        function updateConnectHint() {
+            fetch("/config").then(r => r.json()).then(cfg => {
+                const hint = document.getElementById('connectHint');
+                if (cfg.minecraftHost && cfg.minecraftPort) {
+                    hint.textContent = cfg.minecraftHost + ':' + cfg.minecraftPort;
+                } else if (cfg.minecraftPort) {
+                    hint.textContent = 'localhost:' + cfg.minecraftPort;
                 }
-                xhr.send();
-
-            }, 1000);
-
-            function start() {
-                const xhr = new XMLHttpRequest();
-                xhr.open("GET", "/start", true);
-                xhr.send();
-                const connectButton = document.getElementById('connectButton');
-                connectButton.innerHTML = "Disconnect";
-                connectButton.setAttribute('onclick', 'stop()');
-                connectButton.className = 'stop';
+            }).catch(() => {});
+        }
+        function loadServerConfig() {
+            fetch("/config").then(r => r.json()).then(cfg => {
+                if (cfg.serverIp) document.getElementById('serverIp').value = cfg.serverIp;
+                if (cfg.serverPort) document.getElementById('serverPort').value = cfg.serverPort;
+                document.getElementById('knockbackTracking').checked = !!cfg.knockbackTracking;
+                updateConnectHint();
+            }).catch(() => {});
+        }
+        document.getElementById('knockbackTracking').addEventListener('change', async function() {
+            await fetch("/config", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ knockbackTracking: this.checked })
+            });
+        });
+        function refreshKnockbackLog() {
+            fetch("/knockback-log").then(r => r.json()).then(log => {
+                const el = document.getElementById('knockbackLog');
+                el.textContent = log.length ? JSON.stringify(log, null, 2) : "(empty - enable tracking and get hit in-game)";
+            }).catch(() => {});
+        }
+        function downloadKnockbackLog() {
+            fetch("/knockback-log").then(r => r.json()).then(log => {
+                const a = document.createElement('a');
+                a.href = 'data:application/json,' + encodeURIComponent(JSON.stringify(log, null, 2));
+                a.download = 'knockback-log.json';
+                a.click();
+            }).catch(() => {});
+        }
+        function clearKnockbackLog() {
+            fetch("/knockback-log", { method: "DELETE" }).then(() => refreshKnockbackLog());
+        }
+        async function saveServerConfig() {
+            const ip = document.getElementById('serverIp').value.trim();
+            const port = document.getElementById('serverPort').value.trim();
+            if (!ip || !port) {
+                alert('Enter both IP and port');
+                return;
             }
-
-            function stop() {
-                const xhr = new XMLHttpRequest();
-                xhr.open("GET", "/stop", true);
-                xhr.send();
-                const connectButton = document.getElementById('connectButton');
-                connectButton.innerHTML = "Connect";
-                connectButton.setAttribute('onclick', 'start()');
-                connectButton.className = 'start';
+            try {
+                const res = await fetch("/config", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ serverIp: ip, serverPort: parseInt(port, 10) })
+                });
+                const json = await res.json();
+                if (json.error) throw new Error(json.error);
+                updateConnectHint();
+            } catch (e) {
+                alert(e.message);
             }
-        </script>
-    </body>
+        }
+        loadServerConfig();
+        refreshKnockbackLog();
+        setInterval(() => {
+            fetch("/update").then(r => r.json()).then(data => {
+                const btn = document.getElementById('connectButton');
+                if (data.connected) {
+                    btn.innerHTML = "Disconnect";
+                    btn.setAttribute('onclick', 'stop()');
+                    btn.className = 'stop';
+                } else {
+                    btn.innerHTML = "Connect";
+                    btn.setAttribute('onclick', 'start()');
+                    btn.className = 'start';
+                }
+            });
+        }, 1000);
+
+        async function sendPacket() {
+            const dir = document.getElementById('packetDir').value;
+            const name = document.getElementById('packetName').value.trim();
+            const dataStr = document.getElementById('packetData').value.trim();
+            const result = document.getElementById('sendResult');
+            if (!name || !dataStr) {
+                result.textContent = "Enter packet name and JSON data";
+                result.className = "error";
+                return;
+            }
+            let data;
+            try {
+                data = JSON.parse(dataStr);
+            } catch (e) {
+                result.textContent = "Invalid JSON: " + e.message;
+                result.className = "error";
+                return;
+            }
+            try {
+                const res = await fetch("/sendpacket", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ direction: dir, name, data })
+                });
+                const json = await res.json();
+                if (json.error) throw new Error(json.error);
+                result.textContent = "Sent!";
+                result.className = "ok";
+            } catch (e) {
+                result.textContent = e.message;
+                result.className = "error";
+            }
+        }
+
+        let lastPackets = [];
+        function refreshPackets() {
+            fetch("/packets").then(r => r.json()).then(packets => {
+                lastPackets = packets;
+                const list = document.getElementById('packetList');
+                if (packets.length === 0) {
+                    list.innerHTML = "<p class='empty'>No packets yet. Connect and play to see traffic.</p>";
+                    return;
+                }
+                list.innerHTML = packets.map((p, i) => {
+                    const dataStr = JSON.stringify(p.data);
+                    const short = dataStr.length > 100 ? dataStr.slice(0, 100) + "…" : dataStr;
+                    return `<div class="packet-item" data-i="${i}" onclick="usePacket(${i})">
+                        <span class="dir dir-${p.dir}">${p.dir}</span>
+                        <span class="name">${p.name}</span>
+                        <pre>${short.replace(/</g, "&lt;")}</pre>
+                    </div>`;
+                }).join("");
+            });
+        }
+
+        function usePacket(i) {
+            const p = lastPackets[i];
+            if (!p) return;
+            document.getElementById('packetName').value = p.name;
+            document.getElementById('packetData').value = JSON.stringify(p.data, null, 2);
+            document.getElementById('packetDir').value = p.dir === "client" ? "server" : "client";
+        }
+
+        setInterval(refreshPackets, 2000);
+        refreshPackets();
+    </script>
+</body>
 </html>

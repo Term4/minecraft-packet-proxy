@@ -1,0 +1,11 @@
+{
+  "required": true,
+  "minVersion": "0.7",
+  "package": "com.kbcalculator.mixin",
+  "refmap": "mixins.kbcalculator.refmap.json",
+  "compatibilityLevel": "JAVA_8",
+  "mixins": [
+    "MixinS12PacketEntityVelocity"
+  ],
+  "client": []
+}

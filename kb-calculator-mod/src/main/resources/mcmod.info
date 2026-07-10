@@ -1,0 +1,12 @@
+[
+  {
+    "modid": "kbcalculator",
+    "name": "KB Calculator",
+    "description": "Calculates knockback config from combat data. Use /calculatekb to start.",
+    "version": "${version}",
+    "mcversion": "${mcversion}",
+    "url": "",
+    "authorList": [],
+    "credits": ""
+  }
+]
